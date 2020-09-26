@@ -7,4 +7,4 @@ The end-goal is to produce tools capable of [network diagrams](https://www.data-
 
 Along the way, various intermediate text files and work products will be implemented as well because such might be helpful to another analyst's efforts.
 
-Open-source rules!
+At this point in time, to run the leaked_messages_extractor's logic, invoke the "extract_leaked_messages_to_csv_and_sqlite.py" within this folder.
