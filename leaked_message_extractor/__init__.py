@@ -6,6 +6,16 @@ from datetime import datetime
 
 current_year = "2020"
 
+iso_dow_dict: dict = {
+    "Mon": 1,
+    "Tue": 2,
+    "Wed": 3,
+    "Thu": 4,
+    "Fri": 5,
+    "Sat": 6,
+    "Sun": 7
+}
+
 if __name__ == "leaked_message_extractor":
     text_file_path = "Patriot-Coalition-PNW-Daily-Chatter-Scrapes.txt"
     csv_file_path = "extracted_files/Patriot-Coalition-PNW-Daily-Chatter-Scrapes.csv"
@@ -15,7 +25,7 @@ else:
     csv_file_path = "../extracted_files/Patriot-Coalition-PNW-Daily-Chatter-Scrapes.csv"
     sqlite_db_path = "../extracted_files/patriot-coalition-pnw-daily-chatter-scrapes.sqlite"
 
-fieldnames = ['dts', 'avatar', 'message']
+fieldnames = ['dts', 'day', 'dow', 'avatar', 'message']
 
 
 def create_sqlite_dbase_table_and_indexes(db_path):
@@ -23,6 +33,8 @@ def create_sqlite_dbase_table_and_indexes(db_path):
     sql_stmts.append("""
         CREATE TABLE IF NOT EXISTS messages (
             dts DATETIME NULL,
+            day VARCHAR(10) NULL,
+            dow INTEGER NULL,
             avatar TEXT NULL,
             message TEXT NULL
             )
@@ -35,6 +47,18 @@ def create_sqlite_dbase_table_and_indexes(db_path):
         for sql_stmt in sql_stmts:
             _conn.execute(sql_stmt)
         _conn.commit()
+
+
+def level_break_on_dts_change(cursor, csv_writer, avatar, message, dts, day, dow):
+    # level-break on change of avatar value
+    # outputting and then resetting the values
+    if avatar is not None and message != "":
+        print(f"dts: {dts}, day: {day}, dow: {dow}")
+        print(f"avatar: {avatar}")
+        print(f"message: {message.strip()}")
+        cursor.execute("INSERT INTO messages (dts, day, dow, avatar, message) VALUES(?, ?, ?, ?, ?)",
+                       [dts, day, dow, avatar, message.strip()])
+        csv_writer.writerow([dts, day, dow, avatar, message])
 
 
 def extract_leaked_messages():
@@ -51,23 +75,42 @@ def extract_leaked_messages():
                 avatar = None
                 message = ""
                 dts = None
+                day = None
+                dow = None
                 for text in text_file:
                     text = text.strip()
 
                     # if appropriate, obtain the full date-time stamp
                     try:
                         _d = datetime.strptime(text, "%b %d, %H:%M %p")
+                        level_break_on_dts_change(cursor, csv_writer, avatar, message, dts, day, dow)
+                        avatar = None
+                        message = ""
                         dts = datetime.strptime(f"{current_year} {text}", "%Y %b %d, %I:%M %p")
+                        day = dts.strftime("%a")
+                        dow = dts.isoweekday()
                         continue  # go to next text row
-                    except ValueError as ex:
+                    except ValueError:
                         try:
+                            _d = datetime.strptime(text, "%a, %I:%M %p")
+                            level_break_on_dts_change(cursor, csv_writer, avatar, message, dts, day, dow)
+                            avatar = None
+                            message = ""
                             dts = datetime.strptime(text, "%a, %I:%M %p")
+                            day = text[:3]
+                            dow = iso_dow_dict[day]
                             continue  # go to next text row
-                        except ValueError as ex:
+                        except ValueError:
                             try:
+                                _d = datetime.strptime(text, "%I:%M %p")
+                                level_break_on_dts_change(cursor, csv_writer, avatar, message, dts, day, dow)
+                                avatar = None
+                                message = ""
                                 dts = datetime.strptime(text, "%I:%M %p")
+                                day = None
+                                dow = dts.isoweekday()
                                 continue  # go to next text row
-                            except ValueError as ex:
+                            except ValueError:
                                 pass  # fall-through to code below as text is not in an expected date-time format
 
                     if text.strip() == "Avatar":
@@ -75,12 +118,7 @@ def extract_leaked_messages():
                         # level-break on change of avatar value
                         # outputting and then resetting the values
                         if avatar is not None and message != "":
-                            print(f"dts: {dts}")
-                            print(f"avatar: {avatar}")
-                            print(f"message: {message.strip()}")
-                            cursor.execute("INSERT INTO messages (dts, avatar, message) VALUES(?, ?, ?)",
-                                           [dts, avatar, message.strip()])
-                            csv_writer.writerow([dts, avatar, message])
+                            level_break_on_dts_change(cursor, csv_writer, avatar, message, dts, day, dow)
                             avatar = None
                             message = ""
                             continue  # go to next row
@@ -100,13 +138,8 @@ def extract_leaked_messages():
                         message += f"{text} "
 
                 # end-of-file processing
-                print(f"dts: {dts}")
-                print(f"avatar: {avatar}")
-                print(f"message: {message.strip()}")
-                cursor.execute("INSERT INTO messages (dts, avatar, message) VALUES(?, ?, ?)",
-                               [dts, avatar, message.strip()])
+                level_break_on_dts_change(cursor, csv_writer, avatar, message, dts, day, dow)
                 cursor.close()
-                csv_writer.writerow([dts, avatar, message])
         conn.commit()
 
 
